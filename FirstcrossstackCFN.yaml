@@ -1,0 +1,118 @@
+---
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Reference Architecture to deploy EC2 instance in the region of my choice.
+
+Metadata:
+
+  Authors:
+    Description: Julien Eloumou (aeloumou@gmail.com)
+
+Parameters:
+  SecurityGroupDescription:
+    Description: Security group for SSH to my desktop
+    Type: String
+
+  SecurityGroupPort:
+    Description: Port that is locked for ssh to my Desktop
+    Type: Number
+    MinValue: 20 # out range 19
+    MaxValue: 65535
+  
+  InstanceType:
+    Description: WebServer EC2 instance type (has default, AllowedValues)
+    Type: String
+    Default: t2.micro
+    AllowedValues: #possible values
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+    ConstraintDescription: must be a valid EC2 instance type.
+  
+  DBPwd:
+    NoEcho: true
+    Description: The database admin account password (won't be echoed)
+    Type: String
+  
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances. Linked to AWS Parameter
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  
+  SecurityGroupIngressCIDR:
+    Description: Locked to my Desktop
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 173.66.71.136/32
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  
+Resources:
+  MyEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceType 
+      KeyName: !Ref KeyName 
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", ImageID]
+      SubnetId: !ImportValue SampleNetworkCrossStack-SubnetID
+      SecurityGroupIds:
+        - !Ref SSHSecurityGroup
+        - !ImportValue SampleNetworkCrossStack-SecurityGroupID
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "This was Server launched by Julien Eloumou running using CLouFormation" > /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: JulienCrossstackInstance
+  
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref MyEC2Instance
+  
+  SSHSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Ref SecurityGroupDescription
+      SecurityGroupIngress:
+        - CidrIp: !Ref SecurityGroupIngressCIDR
+          FromPort: !Ref SecurityGroupPort
+          ToPort: !Ref SecurityGroupPort
+          IpProtocol: tcp  
+      VpcId: !ImportValue SampleNetworkCrossStack-VPCID
+
+Mappings: 
+  RegionMap: 
+    us-east-1: 
+      "ImageID": "ami-0c293f3f676ec4f90"
+    us-west-2: 
+      "ImageID": "ami-0b9f27b05e1de14e9"
+    us-west-1: 
+      "ImageID": "ami-0bdb828fd58c52235"
+    eu-west-1: 
+      "ImageID": "ami-047bb4163c506cd98"
+    ap-southeast-1: 
+      "ImageID": "ami-08569b978cc4dfa10"
+    ap-northeast-1: 
+      "ImageID": "ami-06cd52961ce9f0d85"
+
+Outputs:
+  JulienInstancePrivateIp:
+    Description: The private IP of JulienInstance
+    Value: !GetAtt MyEC2Instance.PrivateIp
+    Export: 
+      Name: PrivateIp 
+  JulienInstanceDnsName:
+    Description: Instance DNS name
+    Value: !GetAtt MyEC2Instance.PublicDnsName 
+    Export: 
+      Name: !Sub "${AWS::StackName}-JulienInstanceDnsName"
+  
